@@ -1,3 +1,4 @@
+from typing import Text
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -28,7 +29,7 @@ def seed_everything(seed :  int = 42):
 
 seed_everything(42)
 
-DIR =  "/content/drive/MyDrive/235813_AI 기반 회의 녹취록 요약 경진대회_data"
+DIR =  "/Users/seojiwon/Downloads/sum_open"
 TRAIN_SOURCE =  os.path.join(DIR, "train.json")
 TEST_SOURCE = os.path.join(DIR, "test.json")
 
@@ -191,4 +192,47 @@ class Mecab_Tokenizer():
             sentence = sentence[3:-1]
         return sentence
 
-        
+src_tokenizer = Mecab_Tokenizer(encoder_len, mode = "enc", max_vocab_size = max_vocab_size)
+tar_tokenizer = Mecab_Tokenizer(decoder_len, mode = "dec", max_vocab_size = max_vocab_size)
+
+train_src = src_tokenizer.morpheme(df_train.total)
+val_src =  src_tokenizer.morpheme(df_val.total)
+test_src = src_tokenizer(test.total)
+
+train_tar = tar_tokenizer.morpheme(df_train.summary)
+val_tar =  tar_tokenizer.morpheme(df_val.summary)
+
+train_src_len = []
+for m in train_src:
+    m_len = len(m.split(' '))
+    train_src_len.append(m_len)
+print('train_src_max_len :', max(train_src_len))
+plt.hist(train_src_len, bins=30)
+plt.show()
+
+train_tar_len = []
+for m in train_tar:
+    m_len = len(m.split(' '))
+    train_tar_len.append(m_len)
+print('train_tar_max_len :', max(train_tar_len))
+plt.hist(train_tar_len, bins=30)
+plt.show()
+
+src_tokenizer.fit(train_src)
+tar_tokenizer.fit(train_tar)
+
+train_src_tokens = src_tokenizer.txt2token(train_src)
+val_src_tokens = src_tokenizer.txt2idx(val_src)
+test_src_tokens = src_tokenizer.txt2token(test_src)
+
+train_tar_tokens = tar_tokenizer.txt2idx(train_tar)
+val_tar_tokens =  tar_tokenizer.txt2idx(val_tar)
+
+input_vocab_size = len(src_tokenizer.txt2idx)
+target_vocab_size = len(tar_tokenizer.txt2idx)
+
+# input_vocab_size, target_vocab_size
+
+# df_train.summary.iloc[0]
+
+# train_tar_tokens[0], tar_tokenizer.convert(train_tar_tokens[0])
