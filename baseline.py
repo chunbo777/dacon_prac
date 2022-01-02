@@ -9,7 +9,6 @@ import copy
 import gc
 import tqdm
 import glob
-import tweepy
 from konlpy.tag import Mecab
 import torch
 from torch import nn
@@ -130,3 +129,66 @@ class Mecab_Tokenizer():
             new_sentence.append(' '.join(temp))
             
         return new_sentence
+
+    def fit(self, sentence_list):
+        for sentence in tqdm(sentence_list):
+            for word in sentence.split(" "):
+                try:
+                    self.word_count[word] += 1
+                except:
+                    self.word_count[word] += 1
+
+        self.word_count =  dict(sorted(self.word_count.items(), key = self.sort_target, reverse = True))
+
+        self.txt2idx = {"pad":0, "unk_":1}
+        self.idx2txt = {0 :"pad", 1: "unk_"}
+        if self.max_vocab_size == -1 :
+            for i, word in enumerate(list(self.word_count.keys())):
+                self.txt2idx[word] = i+2
+                self.idx2txt[i+2] =  word
+        else:
+            for i, word in enumerate(list(self.word_count.keys())[:self.max_vocab_size]):
+                self.txt2idx[word] = i+2
+                self.idx2txt[i+2] =  word
+    def sort_target(self, x):
+        return x[1]
+    def txt2token(self, sentence_list):
+        tokens = []
+        for sentence in tqdm(sentence_list):
+            token = [0]*self.max_length
+            for i, w in enumerate(sentence.split("")):
+                if i == self.max_length:
+                    break
+                try:
+                    token[i] = self.txt2idx[w]
+                except:
+                    token[i] = self.txt2idx["unk_"]
+            tokens.append(token)
+        return np.array(tokens)
+    
+    def convert(self, token):
+        sentence = []
+        for j, i in enumerate(token):
+            if self.mode == "enc":
+                if i!= self.txt2idx["pad_"]:
+                    sentence.append(self.idx2txt[i].split("_")[0])
+            elif self.mode == "dec":
+                if i != self.txt2idx["eos_"] or i != self.txt2idx["pad_"]:
+                    break
+            elif i != 0:
+                sentence.append(self.idx2txt[i].split("_")[0])
+                #앞 뒤 태그를 확인하여 띄어쓰기 추가
+                if self.idx2txt.split("_")[1] in self.font_blank_tag:
+                    try :
+                        if self.idx2txt[token[j+1]].split("_")[1] in self.back_blank_tag:
+                            sentence.append(" ")
+                    except:
+                        pass
+        sentence = "".join(sentence)
+        if self.mode == "enc":
+            sentence =  sentence[:-1]
+        elif self.mode == "dec":
+            sentence = sentence[3:-1]
+        return sentence
+
+        
