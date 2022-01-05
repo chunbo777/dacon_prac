@@ -8,11 +8,13 @@ import random
 import math
 import copy
 import gc
+import sys 
+
+# sys.path.insert(0, "/opt/homebrew/Caskroom/miniforge/base/envs/coding/lib/python3.8/site-packages")
 from torch.nn.modules.activation import MultiheadAttention
 from tqdm import tqdm
-import sys 
-sys.path.insert(0, "/Users/seojiwon/Library/Python/3.8/lib/python/site-packages")
 import glob
+sys.path.insert(0, "/Users/seojiwon/Library/Python/3.8/lib/python/site-packages/")
 from konlpy.tag import Mecab
 import torch
 from torch import nn
@@ -77,7 +79,7 @@ test["total"] = test.title + " " + test.region + " " + test.context
 train.head()
 
 encoder_len = 500
-decoder_len = 50
+decoder_len = 500
 max_vocab_size = 20000
 batch_size = 32
 num_layers = 6
@@ -277,15 +279,16 @@ test_dataloader =  torch.utils.data.DataLoader(test_dataset, batch_size = batch_
 
 # transformer
 
-
+"""get angles:
+    포지셔널 인코딩을 위해 각 순서의 angle 설정"""
 def get_angles(pos, i, d_model):
-    angle_rates =  1 /np.power(1₩/np.float32(d_model)) 
+    angle_rates =  1 / np.power(10000, (2 * (i//2)) / np.float32(d_model))  #d_model =  512 (임베딩 벡터 차원 수)
     return  pos * angle_rates
 
 
 def positional_encoding(position, d_model):
-    angle_rads =  get_angles(np.arange(position)[:, np.newaxis],
-                            np.arange(d_model)[np.newaxis, :], 
+    angle_rads =  get_angles(np.arange(position)[:, np.newaxis], #pos - 위치정보 리스트
+                            np.arange(d_model)[np.newaxis, :], #i 차원에 대한 리스트 
                             d_model) #차원 하나 늘려주기 
     #어레이에 있는 각 홀수 인덱스마다 사인함수 걸어주기
     angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
@@ -305,27 +308,26 @@ def create_padding_mask(seq):
     #(배치사이즈, 1,1, 시퀀스렝스)
 
 
-# def create_look_ahead_mask(size):
-#     mask = torch.ones(size, size).triu(diagonal=1)
-#     return mask  # (seq_len, seq_len)
 
-def create_look_ahead_mask(size):
+def create_look_ahead_mask(size): #순방향 마스크 만들기
     mask =  torch.ones(size, size).triu(diagonal=1)
     return mask #(seq_len, seq_len)
 
 def scaled_dot_product_attention(q, k, v, mask):
+    #첫번째로 쿼리와 키값을 내적
     matmul_qk = torch.matmul(q, torch.transpose(k, -2, -1)) #(..., seq_len_q, seq_len_k)
 
     dk = k.size()[-1]
+    # dk =  키 값의 임베딩 차원 수 
     scaled_attention_logits =  matmul_qk /math.sqrt(dk)
-
-    # 스케일링 된 텐서에 마스크 붙여주기
+    # q와 k의 내적 (각 값들 관의 관계식)을 루트 임베딩 값으로 나눠주기(스케일링) = > 코사인 시밀러리티
+    #  마스크를 붙여야 하면 = > 스케일링 된 텐서에 마스크 붙여주기
     if mask is not None:
         scaled_attention_logits += (mask * -1e9)
-    attention_weights = torch.nn.functional.softmax(scaled_attention_logits, dim = 1)
-    output = torch.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
+    attention_weights = torch.nn.functional.softmax(scaled_attention_logits, dim = 1) # 어텐션 가중치를 소프트맥스로 구하기 
+    output = torch.matmul(attention_weights, v)  # (..., seq_len_q, depth_v) #마지막으로 어텐션 확률과 자기 자신(v를 내적하면 끝!
 
-    return output, attention_weights
+    return output, attention_weights 
 
 def print_out(q, k, v):
     temp_out, temp_attn = scaled_dot_product_attention(
@@ -359,7 +361,8 @@ temp_q = torch.tensor([[0, 0, 10],
                       [0, 10, 0],
                       [10, 10, 0]], dtype=torch.float32)  # (3, 3)
 print_out(temp_q, temp_k, temp_v)
-
+sys.path.insert(0, "/Users/seojiwon/Library/Python/3.8/lib/python/site-packages")
+from torch.nn import Module
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads):
         super(MultiHeadAttention, self).__init__()
@@ -385,81 +388,82 @@ class MultiHeadAttention(nn.Module):
 
         # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
-
+        scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask)
         scaled_attention =  scaled_attention.transpose(1,2).contiguous().view(batch_size, -1, self.num_heads *  self. depth)
 
         output = self.wo(scaled_attention) # batch size, sel_len_q, d_model
 
-        return output, attention_weight
+        return output, attention_weights #아웃풋 사이즈(1, 60, 512 => batch_size , depth, d_model) #어텐션 웨이트 사이즈 = (1, 8, 60, 60) (1, head, depth, 512/head)
+
 
 
 # out.shape, attn.shape
-temp_mha = MultiheadAttention(d_model =  512, num_heads = 8)
+temp_mha = MultiHeadAttention(d_model = 512, num_heads = 8)
 y =  torch.rand(1, 60, 512)
-out, attn =  temp_mha(y, key = y,  q = y, mask =  None)
-# out.shape, attn.shape
-# class FFN(nn.Module):
-#     def __init__(self, d_model, dff):
-#         super(FFN, self).__init__()
-#         self.layer1 = nn.Linear(d_model, dff)
-#         self.activation = nn.ReLU()
-#         self.fc = nn.Linear(dff, d_model)
+out, attn =  temp_mha.forward(y, k = y,  q = y, mask =  None)
 
-#     def forward(self, x):
-#         x = self.layer1(x)
-#         x = self.activation(x)
-#         x = self.fc(x)
+class FFN(nn.Module):
+    def __init__(self, d_model, dff):
+        super(FFN, self).__init__()
+        self.layer1 = nn.Linear(d_model, dff)
+        self.activation =  nn.ReLU()
+        self.fc = nn.Linear(dff, d_model)
 
-#         return x
-# class EncoderLayer(nn.Module):
-#     def __init__(self, d_model, num_heads, dff, maximum_position_encoding, rate=0.1):
-#         super(EncoderLayer, self).__init__()
 
-#         self.mha = MultiHeadAttention(d_model, num_heads)
-#         self.ffn = FFN(d_model, dff)
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.activation(x)
+        x = self.fc(x)
+
+        return x
+class EncoderLayer(nn.Module):
+    def __init__(self, d_model, num_heads, dff, maximum_position_encoding, rate = 0.1):
+        super(EncoderLayer, self).__init__()
         
-#         self.layernorm1 = nn.LayerNorm([maximum_position_encoding, d_model])
-#         self.layernorm2 = nn.LayerNorm([maximum_position_encoding, d_model])
-        
-#         self.dropout1 = nn.Dropout(rate)
-#         self.dropout2 = nn.Dropout(rate)
+        self.mha  =  MultiheadAttention(d_model, num_heads) #512, 8
+        self.ffn = FFN(d_model, dff) #512, 2048
+
+        self.layernorm1 = nn.LayerNorm([maximum_position_encoding, d_model]) #500, 512
+        self.layernorm2 = nn.LayerNorm([maximum_position_encoding, d_model]) #500, 512
+
+        self.dropout1 = nn.Dropout(rate)
+        self.dropout2 = nn.Dropout(rate)
+
+    def forward(self, x, mask):
+        attn_output, _ = self.mha(x,x,x, mask)
+        attn_output =  self.dropout1(attn_output)
+        out1 = self.layernorm1(x + attn_output)
+
+        ffn_output =  self.ffn(out1)
+        ffn_output = self.dropout2(ffn_output)
+        out2 = self.layernorm2(out1 + ffn_output) #concat
+
+        return out2
+
+sample_encoder_layer = EncoderLayer(512, 8, 2048, encoder_len) #d_model, num_heads, dff, maximum_position_encoding
+sample_encoder_layer_output =  sample_encoder_layer(
+    torch.rand(64, encoder_len, 512), None
+)
 
 
-#     def forward(self, x, mask):
-#         attn_output, _ = self.mha(x, x, x, mask)  # (batch_size, input_seq_len, d_model)
-#         attn_output = self.dropout1(attn_output)
-#         out1 = self.layernorm1(x + attn_output)  # (batch_size, input_seq_len, d_model)
 
-#         ffn_output = self.ffn(out1)  # (batch_size, input_seq_len, d_model)
-#         ffn_output = self.dropout2(ffn_output)
-#         out2 = self.layernorm2(out1 + ffn_output)  # (batch_size, input_seq_len, d_model)
+class DecoderLayer(nn.Module):
+    def __init__(self, d_model, num_heads, dff, maximum_position_encoding, rate = 0.1):
+        super(DecoderLayer, self).__init__()
+        self.mha1 = MultiheadAttention(d_model, num_heads)
+        self.mha2 = MultiheadAttention(d_model, num_heads)
 
-#         return out2
+        self.ffn = FFN(d_model, dff)
+
+        self.dropout1 = nn.Dropout(rate)
+        self.dropout2 = nn.Dropout(rate)
+        self.dropout3 = nn.Dropout(rate)
+
+        self.layernorm1 = nn.ModuleList([copy.deepcopy(nn.LayerNorm([i+1, d_model])) for i in range(maximum_position_encoding)])
+        self.layernorm2 = nn.ModuleList([copy.deepcopy(nn.LayerNorm([i+1, d_model])) for i in range(maximum_position_encoding)])
+        self.layernorm3 = nn.ModuleList([copy.deepcopy(nn.LayerNorm([i+1, d_model])) for i in range(maximum_position_encoding)])
 
 
-# sample_encoder_layer = EncoderLayer(512, 8, 2048, encoder_len)
-
-# sample_encoder_layer_output = sample_encoder_layer(
-#     torch.rand(64, encoder_len, 512), None)
-
-# sample_encoder_layer_output.shape  # (batch_size, input_seq_len, d_model)
-
-# class DecoderLayer(nn.Module):
-#     def __init__(self, d_model, num_heads, dff, maximum_position_encoding, rate=0.1):
-#         super(DecoderLayer, self).__init__()
-
-#         self.mha1 = MultiHeadAttention(d_model, num_heads)
-#         self.mha2 = MultiHeadAttention(d_model, num_heads)
-        
-#         self.ffn = FFN(d_model, dff)
-        
-#         self.dropout1 = nn.Dropout(rate)
-#         self.dropout2 = nn.Dropout(rate)
-#         self.dropout3 = nn.Dropout(rate)
-        
-#         self.layernorms1 = nn.ModuleList([copy.deepcopy(nn.LayerNorm([i+1, d_model])) for i in range(maximum_position_encoding)])
-#         self.layernorms2 = nn.ModuleList([copy.deepcopy(nn.LayerNorm([i+1, d_model])) for i in range(maximum_position_encoding)])
-#         self.layernorms3 = nn.ModuleList([copy.deepcopy(nn.LayerNorm([i+1, d_model])) for i in range(maximum_position_encoding)])
 
 #     def forward(self, x, enc_output, look_ahead_mask, padding_mask):
 #         # enc_output.shape == (batch_size, input_seq_len, d_model)
@@ -476,55 +480,75 @@ out, attn =  temp_mha(y, key = y,  q = y, mask =  None)
 #         out3 = self.layernorms3[x.size(1)-1](ffn_output + out2)  # (batch_size, target_seq_len, d_model)
         
 #         return out3, attn_weights_block1, attn_weights_block2
+    def forward(self, x, enc_output, look_ahead_mask, padding_mask):
+        attn1, attn_weights_block1 = self.mha1(x,x,x,look_ahead_mask)
+        attn1 = self.dropout1(attn1)
+        out1 = self.layernorm1[x.size(1)-1](attn1 + x)
 
-# sample_decoder_layer = DecoderLayer(512, 8, 2048, decoder_len)
+        attn2, attn_weights_block2 = self.mha2(enc_output, enc_output, out1, padding_mask)
+        attn2 = self.dropout2(attn2)
+        out2 = self.layernorm2[x.size(1)-1](attn2+out1)
 
-# sample_decoder_layer_output, _, _ = sample_decoder_layer(
-#     torch.rand(64, decoder_len, 512), sample_encoder_layer_output,
-#     None, None)
+        ffn_output = self.ffn(out2)
+        ffn_output = self.dropout3(ffn_output)
+        out3 = self.layernorm3[x.size(1)-1](ffn_output + out2)
 
-# sample_decoder_layer_output.shape  # (batch_size, target_seq_len, d_model)
+        return out3, attn_weights_block1, attn_weights_block2
+
+
+        
+
+sample_decoder_layer = DecoderLayer(512, 8, 2048, decoder_len)
+sample_decoder_layer_output, _, _ = sample_decoder_layer(
+    torch.rand(64, decoder_len, 512), sample_encoder_layer_output, 
+    None, None
+)
 
 # def clones(module, N):
 #     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
-# class Encoder(nn.Module):
-#     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size, maximum_position_encoding, device, rate=0.1):
-#         super(Encoder, self).__init__()
 
-#         self.d_model = d_model
-#         self.num_layers = num_layers
 
-#         self.embedding = nn.Embedding(input_vocab_size, d_model)
-#         self.pos_encoding = positional_encoding(maximum_position_encoding, d_model).to(device)
+def clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+
+class Encoder(nn.Module):
+    def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size, maximum_position_encoding, device, rate = 0.1):
+        super(Encoder, self).__init__()
+
+        self.d_model = d_model
+        self.num_layers = num_layers
+
+        self.embedding = nn.Embedding(input_vocab_size, d_model)
+        self.pos_encoding = positional_encoding(maximum_position_encoding, d_model).to(device)
+
+        self.dec_layers = clones(EncoderLayer(d_model, num_heads, dff, maximum_position_encoding, rate), num_layers)
+        self.dropout = nn.Dropout(rate)
         
-#         self.dec_layers = clones(EncoderLayer(d_model, num_heads, dff, maximum_position_encoding, rate), num_layers)
-#         self.dropout = nn.Dropout(rate)
-
-#     def forward(self, x, mask, enc_output=None):
-#         if enc_output == None:
-#             seq_len = x.size()[1]
-#             attention_weights = {}
-#             x = self.embedding(x)  # (batch_size, target_seq_len, d_model)
-#             x *= torch.sqrt(torch.tensor(self.d_model, dtype=torch.float32))
-#             x += self.pos_encoding[:, :seq_len, :]
-#             x = self.dropout(x)
-#             for i in range(self.num_layers):
-#                 x = self.dec_layers[i](x, mask)
-#         else:
-#             x = enc_output
+    def forward(self, x, mask, enc_output=None):
+        if enc_output == None:
+            seq_len = x.size()[1]
+            attention_weights = {}
+            x = self.embedding(x)  # (batch_size, target_seq_len, d_model)
+            x *= torch.sqrt(torch.tensor(self.d_model, dtype=torch.float32))
+            x += self.pos_encoding[:, :seq_len, :]
+            x = self.dropout(x)
+            for i in range(self.num_layers):
+                x = self.dec_layers[i](x, mask)
+        else:
+            x = enc_output
             
-#         return x
+        return x
 
-# sample_encoder = Encoder(num_layers=2, d_model=512, num_heads=8,
-#                          dff=2048, input_vocab_size=input_vocab_size,
-#                          maximum_position_encoding=encoder_len,
-#                          device='cpu')
+sample_encoder = Encoder(num_layers=2, d_model=512, num_heads=8,
+                         dff=2048, input_vocab_size=input_vocab_size,
+                         maximum_position_encoding=encoder_len,
+                         device='cpu')
 
-# temp_input = torch.randint(low=0, high=input_vocab_size, size=(64, encoder_len))
+temp_input = torch.randint(low=0, high=input_vocab_size, size=(64, encoder_len))
 
-# sample_encoder_output = sample_encoder(temp_input, mask=None, enc_output=None)
+sample_encoder_output = sample_encoder(temp_input, mask=None, enc_output=None)
 
-# print(sample_encoder_output.shape)  # (batch_size, input_seq_len, d_model)
+print(sample_encoder_output.shape)  # (batch_size, input_seq_len, d_model)
 
 # class Decoder(nn.Module):
 #     def __init__(self, num_layers, d_model, num_heads, dff, target_vocab_size, maximum_position_encoding, device, rate=0.1):
