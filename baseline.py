@@ -283,7 +283,7 @@ test_dataloader =  torch.utils.data.DataLoader(test_dataset, batch_size = batch_
     포지셔널 인코딩을 위해 각 순서의 angle 설정"""
 def get_angles(pos, i, d_model):
     angle_rates =  1 / np.power(10000, (2 * (i//2)) / np.float32(d_model))  #d_model =  512 (임베딩 벡터 차원 수)
-    return  pos * angle_rates
+    return  pos * angle_rates #전체에 대해서 레이트 곱해주기
 
 
 def positional_encoding(position, d_model):
@@ -432,7 +432,7 @@ class EncoderLayer(nn.Module):
     def forward(self, x, mask):
         attn_output, _ = self.mha(x,x,x, mask)
         attn_output =  self.dropout1(attn_output)
-        out1 = self.layernorm1(x + attn_output)
+        out1 = self.layernorm1(x + attn_output) #residual connection
 
         ffn_output =  self.ffn(out1)
         ffn_output = self.dropout2(ffn_output)
@@ -511,7 +511,7 @@ sample_decoder_layer_output, _, _ = sample_decoder_layer(
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
-class Encoder(nn.Module):
+class Encoder(nn.Module): #여러개의 인코더 레이어를 쌓기 위한 클래스
     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size, maximum_position_encoding, device, rate = 0.1):
         super(Encoder, self).__init__()
 
@@ -533,7 +533,7 @@ class Encoder(nn.Module):
             x += self.pos_encoding[:, :seq_len, :]
             x = self.dropout(x)
             for i in range(self.num_layers):
-                x = self.dec_layers[i](x, mask)
+                x = self.dec_layers[i](x, mask) #클론된 인코더 레이어임 
         else:
             x = enc_output
             
@@ -562,7 +562,21 @@ print(sample_encoder_output.shape)  # (batch_size, input_seq_len, d_model)
         
 #         self.dec_layers = clones(DecoderLayer(d_model, num_heads, dff, maximum_position_encoding, rate), num_layers)
 #         self.dropout = nn.Dropout(rate)
-        
+
+class Decoder(nn.Module):
+    def __init__(self, num_layers, d_model, num_heads, dff, target_vocab_size, maximum_posiotion_encoding, device, rate = 0.1):
+        super(Decoder, self).__init__()
+
+        self.d_model =  d_model
+        self.num_layers =  num_layers
+
+        self.embedding = nn.Embedding(target_vocab_size, d_model)
+        self.pos_encoding = positional_encoding(maximum_posiotion_encoding, d_model).to(device)
+
+        self.dec_layers = clones(DecoderLayer(d_model, num_heads, dff, maximum_posiotion_encoding, rate), num_layers)
+        self.dropout = nn.Dropout(rate)
+
+
 #     def forward(self, x, enc_output, look_ahead_mask, padding_mask):
 #         seq_len = x.size()[1]
 #         attention_weights = {}
@@ -579,6 +593,20 @@ print(sample_encoder_output.shape)  # (batch_size, input_seq_len, d_model)
             
 #         # x.shape == (batch_size, target_seq_len, d_model)
 #         return x, attention_weights
+    def forward(self, x, enc_output, look_ahead_mask, padding_mask):
+        seq_len = x.size()[1]
+        attention_weights = {}
+        x = self.embedding(x)
+        x *= torch.sqrt(torch.tensor(self.d_model, dtype = torch.float32))
+        x += self.pos_encoding[:, :seq_len, :]
+        x = self.dropout(x)
+
+        for i in range(self.num_layers):
+            x, block1, block2 = self.dec_layers[i](x, enc_output, look_ahead_mask, padding_mask)
+
+            attention_weights["decoder_layer{}_block1".format(i+1)] = block1
+            attention_weights["decoder_layer{}_block2".format(i+1)] =  block2
+        return x , attention_weights
 
 # sample_decoder = Decoder(num_layers=2, d_model=512, num_heads=8,
 #                          dff=2048, target_vocab_size=target_vocab_size,
