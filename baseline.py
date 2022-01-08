@@ -8,7 +8,8 @@ import random
 import math
 import copy
 import gc
-import sys 
+import sys
+from torch.nn.modules import transformer 
 
 # sys.path.insert(0, "/opt/homebrew/Caskroom/miniforge/base/envs/coding/lib/python3.8/site-packages")
 from torch.nn.modules.activation import MultiheadAttention
@@ -595,7 +596,7 @@ class Decoder(nn.Module):
 #         return x, attention_weights
     def forward(self, x, enc_output, look_ahead_mask, padding_mask):
         seq_len = x.size()[1]
-        attention_weights = {}
+        attention_weights = {} 
         x = self.embedding(x)
         x *= torch.sqrt(torch.tensor(self.d_model, dtype = torch.float32))
         x += self.pos_encoding[:, :seq_len, :]
@@ -612,15 +613,24 @@ class Decoder(nn.Module):
 #                          dff=2048, target_vocab_size=target_vocab_size,
 #                          maximum_position_encoding=decoder_len,
 #                          device='cpu')
-
+sample_decoder = Decoder(num_layers = 2, d_model = 512, num_heads = 8,
+                        dff = 2048, target_vocab_size = target_vocab_size,
+                        maximum_posiotion_encoding=decoder_len,
+                        device = "cpu")
 # temp_input = torch.randint(low=0, high=target_vocab_size, size=(64, decoder_len))
+temp_input = torch.randint(low=0, high = target_vocab_size, size = (64, decoder_len))
 
 # output, attn = sample_decoder(temp_input,
 #                               enc_output=sample_encoder_output,
 #                               look_ahead_mask=None,
 #                               padding_mask=None)
 
-# output.shape, attn['decoder_layer2_block2'].shape
+output, attn = sample_decoder(temp_input,
+                              enc_output =  sample_encoder_output,
+                              look_ahead_mask = None,
+                              padding_mask =  None)
+
+output.shape, attn['decoder_layer2_block2'].shape
 
 # class Transformer(nn.Module):
 #     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size,
@@ -634,6 +644,18 @@ class Decoder(nn.Module):
 #                                target_vocab_size, pe_target, device, rate)
 
 #         self.final_layer = nn.Linear(d_model, target_vocab_size)
+
+class Transformer(nn.Module):
+    def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size,
+                target_vocab_size, pe_input, pe_target, device, rate = 0.1):
+        super().__init__()
+        self.device =  device
+        self.encoder = Encoder(num_layers, d_model, num_heads, dff, 
+                        input_vocab_size, pe_target, device, rate)
+        self.decoder =  Decoder(num_layers, d_model, num_heads, dff, 
+                                target_vocab_size, pe_target, device, rate)
+        self.final_layer =  nn.Linear(d_model, target_vocab_size)
+
 
 #     def forward(self, inputs):
 #         inp, tar, enc_output = inputs
@@ -649,6 +671,19 @@ class Decoder(nn.Module):
 #         final_output = self.final_layer(dec_output)  # (batch_size, tar_seq_len, target_vocab_size)
 
 #         return final_output, attention_weights, enc_output
+
+    def forward(self, inputs):
+        inp, tar, enc_output =  inputs
+
+        enc_padding_mask, look_ahead_mask, dec_padding_mask =  self.create_masks(inp, tar)
+
+        enc_output = self.encoder(inp, enc_padding_mask, enc_output)
+
+        dec_output, attention_weights = self.decoder(tar, enc_output, look_ahead_mask, dec_padding_mask)
+
+        final_output = self.final_layer(dec_output)
+
+        return final_output, attention_weights, enc_output
 
 #     def create_masks(self, inp, tar):
 #         # Encoder padding mask
@@ -667,6 +702,17 @@ class Decoder(nn.Module):
 
 #         return enc_padding_mask, look_ahead_mask, dec_padding_mask
 
+    def create_masks(self, inp, tar):
+        enc_padding_mask = create_padding_mask(inp)
+
+        dec_padding_mask = create_padding_mask(inp)
+
+        look_ahead_mask = create_look_ahead_mask(tar.size(1))
+        dec_target_padding_mask =  create_padding_mask(tar)
+        look_ahead_mask = torch.maximum(dec_target_padding_mask.to(self.device), look_ahead_mask.to(self.device))
+
+        return enc_padding_mask, look_ahead_mask, dec_padding_mask
+
 # transformer = Transformer(
 #     num_layers=num_layers,
 #     d_model=d_model,
@@ -679,5 +725,16 @@ class Decoder(nn.Module):
 #     device=device,
 #     rate=dropout_rate
 # )
-
-# transformer = transformer.to(device)
+transformer = Transformer(
+    num_layers = num_layers, 
+    d_model =  d_model,
+    num_heads= num_heads,
+    dff = dff,
+    input_vocab_size = input_vocab_size, 
+    target_vocab_size = target_vocab_size,
+    pe_input =  encoder_len,
+    pe_target= decoder_len -1, 
+    device = device,
+    rate = dropout_rate
+)
+transformer = transformer.to(device)
