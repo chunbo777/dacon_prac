@@ -520,8 +520,8 @@ class Encoder(nn.Module): #여러개의 인코더 레이어를 쌓기 위한 클
         self.num_layers = num_layers
 
         self.embedding = nn.Embedding(input_vocab_size, d_model)
-        self.pos_encoding = positional_encoding(maximum_position_encoding, d_model).to(device)
-
+        self.pos_encoding = positional_encoding(maximum_position_encoding, d_model)
+        #  self.pos_encoding = positional_encoding(maximum_position_encoding, d_model).to(device)
         self.dec_layers = clones(EncoderLayer(d_model, num_heads, dff, maximum_position_encoding, rate), num_layers)
         self.dropout = nn.Dropout(rate)
         
@@ -572,7 +572,7 @@ class Decoder(nn.Module):
         self.num_layers =  num_layers
 
         self.embedding = nn.Embedding(target_vocab_size, d_model)
-        self.pos_encoding = positional_encoding(maximum_posiotion_encoding, d_model).to(device)
+        self.pos_encoding = positional_encoding(maximum_posiotion_encoding, d_model)
 
         self.dec_layers = clones(DecoderLayer(d_model, num_heads, dff, maximum_posiotion_encoding, rate), num_layers)
         self.dropout = nn.Dropout(rate)
@@ -737,4 +737,173 @@ transformer = Transformer(
     device = device,
     rate = dropout_rate
 )
-transformer = transformer.to(device)
+# transformer = transformer.to(device)
+# optimizer = torch.optim.Adam(transformer.parameters(), lr=learning_rate)
+# criterion = nn.CrossEntropyLoss()
+## 손실함수 및 평가함수 정의
+
+optimizer =  torch.optim.Adam(transformer.parameters(), lr  = learning_rate)
+criterion = nn.CrossEntropyLoss()
+
+
+# def loss_function(real, pred):
+#     mask = torch.logical_not(torch.eq(real, 0))
+#     loss_ = criterion(pred.permute(0,2,1), real)
+#     mask = torch.tensor(mask, dtype=loss_.dtype)
+#     loss_ = mask * loss_
+
+#     return torch.sum(loss_)/torch.sum(mask) 
+def loss_function(real, pred):
+    mask = torch.logical_not(torch.eq(real, 0))
+    loss_ = criterion(pred.permute(0,2,1), real)
+    mask = torch.tensor(mask, dtype = loss_.dtype)
+    loss_ = mask * loss_
+
+    return torch.sum(loss_)/torch.sum(mask)
+
+# def accuracy_function(real, pred):
+#     accuracies = torch.eq(real, torch.argmax(pred, dim=2))
+#     mask = torch.logical_not(torch.eq(real, 0))
+#     accuracies = torch.logical_and(mask, accuracies)
+#     accuracies = torch.tensor(accuracies, dtype=torch.float32)
+#     mask = torch.tensor(mask, dtype=torch.float32)
+    
+#     return torch.sum(accuracies)/torch.sum(mask)
+
+def accuracy_function(real, pred):
+    accuracies = torch.eq(real, torch.argmax(pred, dim =2))
+    mask = torch.logical_not(torch.eq(real, 0))
+    accuracies = torch.logical_and(mask, accuracies)
+    accuracies = torch.tensor(accuracies, dtype = torch.float32)
+
+    return torch.sum(accuracies)/ torch.sum(mask)
+## 학습 정의
+
+
+# def train_step(batch_item, epoch, batch, training):
+#     src = batch_item['src_token'].to(device)
+#     tar = batch_item['tar_token'].to(device)
+    
+#     tar_inp = tar[:, :-1]
+#     tar_real = tar[:, 1:]
+    
+#     if training is True:
+#         transformer.train()
+#         optimizer.zero_grad()
+#         with torch.cuda.amp.autocast():
+#             output, _, _ = transformer([src, tar_inp, None])
+#             loss = loss_function(tar_real, output)
+#         acc = accuracy_function(tar_real, output)
+#         loss.backward()
+#         optimizer.step()
+#         lr = optimizer.param_groups[0]["lr"]
+#         return loss, acc, round(lr, 10)
+def train_step(batch_item, epoch, batch, training):
+    src = batch_item["src_token"].to(device)
+    tar = batch_item["tar_token"].to(device)
+
+    tar_inp =  tar[:, :-1]
+    tar_real =  tar[:, 1:]
+
+    if training is True:
+        transformer.train()
+        optimizer.zero_grad()
+        with torch.cuda.amp.autocast():
+            output, _, _ = transformer([src, tar_inp, None])
+            loss = loss_function(tar_real, output)
+        acc = accuracy_function(tar_real, output)
+        loss.backward()
+        optimizer.step()
+        lr = optimizer.param_groups[0]["lr"]
+        return loss, acc, round(lr, 10)
+
+#     else:
+#         transformer.eval()
+#         with torch.no_grad():
+#             output, _, _ = transformer([src, tar_inp, None])
+#             loss = loss_function(tar_real, output)
+#         acc = accuracy_function(tar_real, output)
+#         return loss, acc
+    else:
+        transformer.eval()
+        with torch.no_grad():
+            output, _, _ = transformer([src, tar_inp, None])
+            loss = loss_function(tar_real, output)
+        acc = accuracy_function(tar_real, output)
+        return loss, acc
+# transformer.to(device)
+## 학습
+
+# loss_plot, val_loss_plot = [], []
+# acc_plot, val_acc_plot = [], []
+
+loss_plot, val_loss_plot = [], []
+acc_plot, val_acc_plot = [], []
+# for epoch in range(epochs):
+#     gc.collect()
+#     total_loss, total_val_loss = 0, 0
+#     total_acc, total_val_acc = 0, 0
+for epoch in range(epochs):
+    gc.collect()
+    total_loss, total_val_loss = 0, 0
+    total_acc, total_val_acc = 0, 0    
+#     tqdm_dataset = tqdm(enumerate(train_dataloader))
+#     training = True
+#     for batch, batch_item in tqdm_dataset:
+#         batch_loss, batch_acc, lr = train_step(batch_item, epoch, batch, training)
+#         total_loss += batch_loss
+#         total_acc += batch_acc
+    tqdm_dataset = tqdm(enumerate(train_datloader))
+    training = True
+    for batch, batch_item in tqdm_dataset:
+        batch_loss, batch_acc,  lr = train_step(batch_item, epoch, batch, training)
+        total_loss += batch_loss
+        total_acc += batch_acc
+        tqdm_dataset.set_postfix({
+            'Epoch': epoch + 1,
+            'LR' : lr,
+            'Loss': '{:06f}'.format(batch_loss.item()),
+            'Total Loss' : '{:06f}'.format(total_loss/(batch+1)),
+            'Total ACC' : '{:06f}'.format(total_acc/(batch+1))
+        })
+        # tqdm_dataset.set_postfix({
+        #     "Epoch" :  epoch + 1, 
+        #     "LR" : lr, 
+        #     "Loss" : '{:06f}'.format(batch_loss.item()),
+        #     "Total Loss" : '{:06f}'.format(total_loss/batch + 1)),
+        #     'Total ACC' : '{:06f}'.format(total_acc/(batch+1))
+        # })
+    loss_plot.append(total_loss/(batch+1))
+    acc_plot.append(total_acc/(batch+1))
+    
+#     tqdm_dataset = tqdm(enumerate(val_dataloader))
+#     training = False
+#     for batch, batch_item in tqdm_dataset:
+#         batch_loss, batch_acc = train_step(batch_item, epoch, batch, training)
+#         total_val_loss += batch_loss
+#         total_val_acc += batch_acc
+        
+#         tqdm_dataset.set_postfix({
+#             'Epoch': epoch + 1,
+#             'Val Loss': '{:06f}'.format(batch_loss.item()),
+#             'Total Val Loss' : '{:06f}'.format(total_val_loss/(batch+1)),
+#             'Total Val ACC' : '{:06f}'.format(total_val_acc/(batch+1))
+#         })
+#     val_loss_plot.append(total_val_loss/(batch+1))
+#     val_acc_plot.append(total_val_acc/(batch+1))
+    tqdm_dataset =  tqdm(enumerate(val_dataloader))
+    training = False
+    for batch, batch_item in tqdm_dataset:
+        batch_loss, batch_acc = train_step(batch_item, epoch, batch, training)
+        total_val_loss += batch_loss
+        total_val_acc += batch_acc
+        
+        tqdm_dataset.set_postfix({
+            'Epoch': epoch + 1,
+            'Val Loss': '{:06f}'.format(batch_loss.item()),
+            'Total Val Loss' : '{:06f}'.format(total_val_loss/(batch+1)),
+            'Total Val ACC' : '{:06f}'.format(total_val_acc/(batch+1))
+        })
+
+        val_loss_plot.append(total_val_loss/(batch+1))
+        val_acc_plot.append(total_val_acc/(batch+1))
